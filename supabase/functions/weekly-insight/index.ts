@@ -1,15 +1,28 @@
 // Generates the Monday-morning weekly insight (Core Feature 2, Mode 1).
-// Intended to run on a schedule (e.g. a Supabase cron trigger at Sunday
-// 23:00 UTC) via `supabase functions deploy weekly-insight --no-verify-jwt`
-// plus a pg_cron job that calls it for every user, or looped per-user here.
+// Intended to run on a schedule (Sunday night) for every active user.
 //
-// POST body: { "userId": string }  -- called by the scheduler, service-role only.
+// POST body: { "userId": string }
+//
+// Self-contained (no cross-function imports) so it can be pasted directly
+// into the Supabase Dashboard's Edge Function editor.
 
-import { supabaseAdmin } from "../_shared/supabaseAdmin.ts";
+import { createClient } from "jsr:@supabase/supabase-js@2";
 
 const INSIGHT_SYSTEM_PROMPT = `You write the weekly financial insight for "The Financial Hub" app.
 Standard: every insight must give context, reveal a pattern, or show progress over time -- never state the obvious
 ("you spent more on X"), never lecture, never use punishment framing ("you're over budget"). 2-4 sentences, warm, specific numbers.`;
+
+function requireServerEnv(name: string): string {
+  const v = Deno.env.get(name);
+  if (!v) throw new Error(`Missing required server env var: ${name}`);
+  return v;
+}
+
+function supabaseAdmin() {
+  return createClient(requireServerEnv("SUPABASE_URL"), requireServerEnv("SUPABASE_SERVICE_ROLE_KEY"), {
+    auth: { persistSession: false },
+  });
+}
 
 Deno.serve(async (req) => {
   if (req.method !== "POST") return new Response("Method not allowed", { status: 405 });
@@ -18,9 +31,7 @@ Deno.serve(async (req) => {
     const { userId } = await req.json();
     if (!userId) return new Response(JSON.stringify({ error: "Missing 'userId'" }), { status: 400 });
 
-    const apiKey = Deno.env.get("ANTHROPIC_API_KEY");
-    if (!apiKey) throw new Error("Missing ANTHROPIC_API_KEY server env var");
-
+    const apiKey = requireServerEnv("ANTHROPIC_API_KEY");
     const admin = supabaseAdmin();
 
     const { data: profile } = await admin.from("user_profiles").select("*").eq("created_by_id", userId).single();
@@ -40,7 +51,7 @@ Deno.serve(async (req) => {
       .gte("date", weekStart.toISOString().slice(0, 10))
       .lt("date", weekEnd.toISOString().slice(0, 10));
 
-    const totalSpent = (weekExpenses ?? []).reduce((sum, e) => sum + Number(e.amount), 0);
+    const totalSpent = (weekExpenses ?? []).reduce((sum: number, e: { amount: number }) => sum + Number(e.amount), 0);
     const byCategory: Record<string, number> = {};
     for (const e of weekExpenses ?? []) byCategory[e.category] = (byCategory[e.category] ?? 0) + Number(e.amount);
     const topCategory = Object.entries(byCategory).sort((a, b) => b[1] - a[1])[0]?.[0] ?? null;

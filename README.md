@@ -75,33 +75,48 @@ npm install
 
 ### 2. Create a Supabase project
 
-Run the migrations in `supabase/migrations/` against it (via the Supabase
-CLI: `supabase link` then `supabase db push`, or paste them into the SQL
-editor in order).
+Via [supabase.com](https://supabase.com): New Project -> name it, set a DB
+password, pick a region, create. Takes ~2 minutes to provision.
 
-Set these Edge Function secrets (`supabase secrets set KEY=value`), never
-in a client file:
+Two ways to get the schema and functions onto it -- pick whichever fits
+your network access:
+
+**A. Supabase Dashboard (no CLI, no extra network access needed)**
+
+1. **SQL Editor** -> paste and run, in order: `supabase/migrations/0001_init.sql`,
+   `0002_seed_daily_questions.sql`, `0003_tink_tokens.sql`.
+2. **Edge Functions** -> New Function, for each of `tink-exchange`,
+   `tink-sync`, `ai-chat`, `weekly-insight`: name it to match the folder,
+   paste in that folder's `index.ts` content. Each one is self-contained
+   (no imports from a shared folder) specifically so this copy-paste works.
+3. **Edge Functions -> Manage secrets** (or **Project Settings -> Edge
+   Functions**) -> add:
+   ```
+   TINK_CLIENT_ID=...
+   TINK_CLIENT_SECRET=...
+   SUPABASE_URL=...                 (Settings -> API -> Project URL)
+   SUPABASE_ANON_KEY=...             (Settings -> API -> anon/publishable key)
+   SUPABASE_SERVICE_ROLE_KEY=...      (Settings -> API -> service_role/secret key)
+   ANTHROPIC_API_KEY=...
+   ```
+
+**B. Supabase CLI** (needs outbound access to `api.supabase.com`):
 
 ```
-TINK_CLIENT_ID=...
-TINK_CLIENT_SECRET=...
-SUPABASE_URL=...            (same as your project URL)
-SUPABASE_ANON_KEY=...
-SUPABASE_SERVICE_ROLE_KEY=...
-ANTHROPIC_API_KEY=...
-```
-
-Deploy the functions:
-
-```
+supabase link --project-ref <your-project-ref>
+supabase db push
+supabase secrets set TINK_CLIENT_ID=... TINK_CLIENT_SECRET=... \
+  SUPABASE_URL=... SUPABASE_ANON_KEY=... SUPABASE_SERVICE_ROLE_KEY=... \
+  ANTHROPIC_API_KEY=...
 supabase functions deploy tink-exchange
 supabase functions deploy tink-sync
 supabase functions deploy ai-chat
 supabase functions deploy weekly-insight
 ```
 
-Schedule `weekly-insight` to run for each active user (a pg_cron job calling
-it every Sunday night is the simplest option) and `tink-sync` nightly for
+Either way: schedule `weekly-insight` to run for each active user (a
+pg_cron job calling it every Sunday night is the simplest option, via
+**Database -> Cron Jobs** in the dashboard) and `tink-sync` nightly for
 users with `tink_connected = true`, per the spec's "processed automatically
 overnight" principle.
 
